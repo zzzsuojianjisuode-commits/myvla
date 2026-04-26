@@ -1,0 +1,131 @@
+{
+  "xml_file": "task_t_block_to_bin.xml",
+  "task": "pick up the T-shaped block and place it into the trash bin",
+  "control_mode": "delta_eef_pose",
+  "reset_leader_pose": false,
+  "robot_joint_names": [
+    "joint1",
+    "joint2",
+    "joint3",
+    "joint4",
+    "joint5",
+    "joint6"
+  ],
+  "arm_actuator_names": [
+    "actuator_joint1",
+    "actuator_joint2",
+    "actuator_joint3",
+    "actuator_joint4",
+    "actuator_joint5",
+    "actuator_joint6"
+  ],
+  "gripper_joint_names": [
+    "rh_r1",
+    "rh_l1"
+  ],
+  "gripper_actuator_names": [
+    "actuator_rh_r1",
+    "actuator_rh_l1"
+  ],
+  "end_effector": {
+    "type": "body",
+    "name": "tcp_link"
+  },
+  "image_cameras": [
+    "agentview",
+    "egocentric",
+    "sideview"
+  ],
+  "leader_home_qpos": [
+    -0.02914743,
+    -1.5657328,
+    2.6794806,
+    -1.1105849,
+    1.5718971,
+    -0.01073957,
+    0.2
+  ],
+  "home_qpos": [
+    0.043667,
+    -0.150253,
+    1.564202,
+    0.156805,
+    1.570795,
+    -0.043667,
+    0.2
+  ],
+  "keyboard_home_qpos": [
+    0.043667,
+    -0.150253,
+    1.564202,
+    0.156805,
+    1.570795,
+    -0.043667,
+    0.2
+  ],
+  "keyboard_home_pose": {
+    "pos": [0.3, -0.1, 1.0],
+    "rpy_deg": [90.0, 0.0, 90.0]
+  },
+  "gripper_open": 0.2,
+  "gripper_closed": 1.0,
+  "workspace": {
+    "x_range": [0.14, 0.48],
+    "y_range": [-0.12, 0.22],
+    "z": 0.825,
+    "min_xy_dist": 0.11
+  },
+  "object_z": {
+    "t_block": 0.825,
+    "cylinder_small": 0.818,
+    "cylinder_tall": 0.845,
+    "cylinder_wide": 0.824,
+    "hollow_cylinder": 0.832
+  },
+  "trash_bin": {
+    "body_name": "trash_bin",
+    "success_site": "bin_success_region",
+    "avoid_radius": 0.18
+  },
+  "teleop": {
+    "position_step": 0.01,
+    "rotation_step": 0.1,
+    "control_hz": 20,
+    "sim_substeps_per_frame": 8,
+    "gravity_compensation": true,
+    "stop_gripper_on_contact": true,
+    "gripper_hold_margin": 0.35,
+    "grasp_assist": true,
+    "grasp_attach_min_q": 0.45,
+    "grasp_release_q": 0.35,
+    "xyz_bounds": {
+      "x": [0.20, 0.72],
+      "y": [-0.42, 0.36],
+      "z": [0.76, 1.20]
+    }
+  },
+  "viewer": {
+    "keyboard": {
+      "lookat": [0.4, 0.0, 0.6],
+      "distance": 2.0,
+      "azimuth": 180,
+      "elevation": -40
+    },
+    "teleop": {
+      "lookat": [0.6, 0.0, 0.5],
+      "distance": 2.5,
+      "azimuth": 60,
+      "elevation": -50
+    }
+  },
+  "objects": [
+    "t_block",
+    "cylinder_small",
+    "cylinder_tall",
+    "cylinder_wide",
+    "hollow_cylinder"
+  ],
+  "target_object": "t_block",
+  "target_site": "t_block_success_site",
+  "target_marker_body": "teleop_target_marker"
+}
