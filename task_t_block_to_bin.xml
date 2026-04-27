@@ -28,6 +28,7 @@
   <worldbody>
     <light pos="0 0 2.0" dir="0 0 -1" directional="true"/>
 
+
     <body name="table" pos="0.42 0 0.78">
       <geom name="table_top" type="box" size="0.58 0.42 0.02" material="table_mat" friction="1.0 0.005 0.0001"/>
     </body>
@@ -75,10 +76,11 @@
       <geom name="hollow_cylinder_wall_5" type="box" pos="-0.0226 -0.0226 0" quat="0.382683 0 0 -0.923880" size="0.006 0.014 0.032" material="cylinder_magenta" friction="1.2 0.02 0.001"/>
       <geom name="hollow_cylinder_wall_6" type="box" pos="0 -0.0320 0" quat="0.707107 0 0 -0.707107" size="0.006 0.014 0.032" material="cylinder_magenta" friction="1.2 0.02 0.001"/>
       <geom name="hollow_cylinder_wall_7" type="box" pos="0.0226 -0.0226 0" quat="0.923880 0 0 -0.382683" size="0.006 0.014 0.032" material="cylinder_magenta" friction="1.2 0.02 0.001"/>
+      <site name="hollow_cylinder_success_site" pos="0 0 0" size="0.008" rgba="1 0 0 0.6"/>
     </body>
 
-    <body name="camera" pos="0.9 0.0 1.4">
-      <camera name="agentview" pos="0 0 0" xyaxes="0 1 0 -0.5 0 0.707" fovy="60"/>
+    <body name="camera" pos="0.6 -0.1 1.2">
+      <camera name="agentview" pos="0 0 0" xyaxes="0 1 0 -0.5 0 0.707" fovy="70"/>
     </body>
 
     <body name="camera2" pos="0.5 0.0 1.8">
@@ -89,11 +91,6 @@
       <camera name="sideview" pos="0 0 0" xyaxes="0 -1.0 0 0.0 0.0 0.1" fovy="100"/>
     </body>
 
-    <body name="teleop_target_marker" pos="0.42 0 1.0">
-      <geom name="teleop_target_sphere" type="sphere" size="0.018" rgba="0.1 0.9 0.2 0.55" contype="0" conaffinity="0"/>
-      <geom name="teleop_target_height_axis" type="capsule" fromto="0 -0.12 0 0 0.035 0" size="0.005" rgba="0.1 0.9 0.2 0.48" contype="0" conaffinity="0"/>
-      <geom name="teleop_target_position_axis" type="capsule" fromto="0 0 -0.08 0 0 0.08" size="0.005" rgba="0.1 0.65 1.0 0.48" contype="0" conaffinity="0"/>
-    </body>
   </worldbody>
 
 </mujoco>

@@ -1,6 +1,6 @@
 {
   "xml_file": "task_t_block_to_bin.xml",
-  "task": "pick up the T-shaped block and place it into the trash bin",
+  "task": "pick up the hollow cylinder and place it into the trash bin",
   "control_mode": "delta_eef_pose",
   "reset_leader_pose": false,
   "robot_joint_names": [
@@ -65,7 +65,7 @@
   ],
   "keyboard_home_pose": {
     "pos": [0.3, -0.1, 1.0],
-    "rpy_deg": [90.0, 0.0, 90.0]
+    "rpy_deg": [90.0, 0.0, 0.0]
   },
   "gripper_open": 0.2,
   "gripper_closed": 1.0,
@@ -108,7 +108,7 @@
     "keyboard": {
       "lookat": [0.4, 0.0, 0.6],
       "distance": 2.0,
-      "azimuth": 180,
+      "azimuth": 270,
       "elevation": -40
     },
     "teleop": {
@@ -125,7 +125,7 @@
     "cylinder_wide",
     "hollow_cylinder"
   ],
-  "target_object": "t_block",
-  "target_site": "t_block_success_site",
+  "target_object": "hollow_cylinder",
+  "target_site": "hollow_cylinder_success_site",
   "target_marker_body": "teleop_target_marker"
 }

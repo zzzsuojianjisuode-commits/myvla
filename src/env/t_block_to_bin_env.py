@@ -190,6 +190,21 @@ class TBlockToBinEnv:
         self.gripper_geom_ids = self.right_gripper_geom_ids | self.left_gripper_geom_ids
         self.object_geom_ids = self._geom_ids_for_bodies(self.objects)
         self.object_geom_to_name = self._geom_id_to_body_name(self.objects)
+        self.right_grip_pad_geom_id = mujoco.mj_name2id(
+            self.model,
+            mujoco.mjtObj.mjOBJ_GEOM,
+            "rh_r2_grip_pad",
+        )
+        self.left_grip_pad_geom_id = mujoco.mj_name2id(
+            self.model,
+            mujoco.mjtObj.mjOBJ_GEOM,
+            "rh_l2_grip_pad",
+        )
+        self.table_top_geom_id = mujoco.mj_name2id(
+            self.model,
+            mujoco.mjtObj.mjOBJ_GEOM,
+            "table_top",
+        )
 
         self.home_qpos = np.asarray(self.cfg["home_qpos"], dtype=np.float64)
         self.leader_home_qpos = np.asarray(
@@ -377,6 +392,27 @@ class TBlockToBinEnv:
         pos, _ = self.get_end_effector_pose()
         return pos
 
+    def get_gripper_tip_positions(self):
+        if self.left_grip_pad_geom_id < 0 or self.right_grip_pad_geom_id < 0:
+            eef_pos, eef_rot = self.get_end_effector_pose()
+            closing_axis = eef_rot[:, 0]
+            return {
+                "left": eef_pos - 0.055 * closing_axis,
+                "right": eef_pos + 0.055 * closing_axis,
+            }
+        return {
+            "left": self.data.geom_xpos[self.left_grip_pad_geom_id].copy(),
+            "right": self.data.geom_xpos[self.right_grip_pad_geom_id].copy(),
+        }
+
+    def get_projection_plane_z(self):
+        if self.table_top_geom_id >= 0:
+            return float(
+                self.data.geom_xpos[self.table_top_geom_id][2]
+                + self.model.geom_size[self.table_top_geom_id][2]
+            )
+        return float(self.cfg["workspace"]["z"])
+
     def get_robot_qpos(self):
         return np.array([self.data.qpos[addr] for addr in self.robot_qpos_addrs])
 
@@ -389,6 +425,24 @@ class TBlockToBinEnv:
     def get_ee_pose(self):
         pos, rot = self.get_end_effector_pose()
         return np.concatenate([pos, _rot_to_rpy(rot)], dtype=np.float32)
+
+    def get_object_pose(self, pad=10):
+        poses = np.zeros((pad, 6), dtype=np.float32)
+        names = []
+        for idx, object_name in enumerate(self.objects[:pad]):
+            pos = self.get_body_pos(object_name)
+            rot = self.get_body_rot(object_name)
+            poses[idx] = np.concatenate([pos, _rot_to_rpy(rot)]).astype(np.float32)
+            names.append(object_name)
+
+        for idx in range(len(names), pad):
+            names.append(f"pad_{idx}")
+
+        receptacle_q = {
+            "poses": np.zeros((pad,), dtype=np.float32),
+            "names": [f"pad_{idx}" for idx in range(pad)],
+        }
+        return {"poses": poses, "names": names}, receptacle_q
 
     def check_success(self):
         target_site_id = mujoco.mj_name2id(
@@ -533,13 +587,16 @@ class TBlockToBinEnv:
         return q
 
     def _get_keyboard_home_qpos(self):
-        if "keyboard_home_qpos" in self.cfg:
+        home_pose = self.cfg.get("keyboard_home_pose", {})
+        if not home_pose and "keyboard_home_qpos" in self.cfg:
             return np.asarray(self.cfg["keyboard_home_qpos"], dtype=np.float64).copy()
 
-        home_pose = self.cfg.get("keyboard_home_pose", {})
         target_pos = np.asarray(home_pose.get("pos", [0.3, -0.1, 1.0]), dtype=np.float64)
         target_rot = _rpy_to_rot(np.deg2rad(home_pose.get("rpy_deg", [90.0, 0.0, 90.0])))
-        q_init = np.zeros(len(self.robot_joint_names), dtype=np.float64)
+        q_init = np.asarray(
+            self.cfg.get("keyboard_home_qpos", np.zeros(self.action_dim)),
+            dtype=np.float64,
+        )[: len(self.robot_joint_names)]
         q_arm = self.solve_ik_pose(
             target_pos=target_pos,
             target_rot=target_rot,

@@ -47,13 +47,13 @@ class KeyboardDeltaController:
         drot = np.eye(3, dtype=np.float64)
 
         if viewer.is_key_down(glfw.KEY_W):
-            dpos[0] -= self.pose_gain
-        if viewer.is_key_down(glfw.KEY_S):
-            dpos[0] += self.pose_gain
-        if viewer.is_key_down(glfw.KEY_A):
             dpos[1] -= self.pose_gain
-        if viewer.is_key_down(glfw.KEY_D):
+        if viewer.is_key_down(glfw.KEY_S):
             dpos[1] += self.pose_gain
+        if viewer.is_key_down(glfw.KEY_A):
+            dpos[0] += self.pose_gain
+        if viewer.is_key_down(glfw.KEY_D):
+            dpos[0] -= self.pose_gain
         if viewer.is_key_down(glfw.KEY_R):
             dpos[2] += self.pose_gain
         if viewer.is_key_down(glfw.KEY_F):
