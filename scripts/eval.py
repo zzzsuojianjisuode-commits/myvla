@@ -13,11 +13,6 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-DEFAULT_RENAME_MAP = {
-    "observation.images.agentview": "observation.image",
-    "observation.images.egocentric": "observation.wrist_image",
-}
-
 
 def resolve_path(path):
     path = Path(path).expanduser()
@@ -59,7 +54,7 @@ def lerobot_eval_executable():
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Evaluate ACT with the official lerobot-eval entrypoint."
+        description="Evaluate LeRobot behavior cloning policies with fast or official rollout."
     )
     parser.add_argument(
         "--backend",
@@ -71,8 +66,8 @@ def parse_args():
     parser.add_argument("--env-type", default="myvla")
     parser.add_argument("--env-task", default=None)
     parser.add_argument("--plugin", default="src.lerobot_myvla")
-    parser.add_argument("--output-dir", default="outputs/eval/act_joint")
-    parser.add_argument("--job-name", default="act_joint_eval")
+    parser.add_argument("--output-dir", default=None)
+    parser.add_argument("--job-name", default=None)
     parser.add_argument("--episodes", type=int, default=20)
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--max-steps", type=int, default=600)
@@ -97,22 +92,57 @@ def parse_args():
     parser.add_argument("--object-pad", type=int, default=10)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--task", default=None)
+    parser.add_argument(
+        "--num-inference-steps",
+        type=int,
+        default=None,
+        help="Runtime denoising steps for Diffusion Policy. Pass 100 to restore the checkpoint's full DDPM cost.",
+    )
+    parser.add_argument(
+        "--default-diffusion-num-inference-steps",
+        type=int,
+        default=16,
+        help="Used when a Diffusion checkpoint leaves num_inference_steps unset.",
+    )
     parser.add_argument("--use-amp", action="store_true")
     parser.add_argument("--trust-remote-code", action="store_true")
     args, extra_args = parser.parse_known_args()
     return args, extra_args
 
 
-def load_act_runtime(policy_path, device):
-    from lerobot.policies.act.modeling_act import ACTPolicy
+def load_policy_type(policy_path):
+    config_path = policy_path / "config.json"
+    with config_path.open("r", encoding="utf-8") as f:
+        config = json.load(f)
+    return config.get("type")
+
+
+def load_policy_config(policy_path):
+    config_path = policy_path / "config.json"
+    with config_path.open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def load_policy_runtime(policy_path, device):
+    from lerobot.policies.factory import get_policy_class
     from lerobot.processor import PolicyProcessorPipeline
-    from lerobot.processor.converters import policy_action_to_transition, transition_to_policy_action
+    from lerobot.processor.converters import (
+        batch_to_transition,
+        policy_action_to_transition,
+        transition_to_batch,
+        transition_to_policy_action,
+    )
     from lerobot.utils.constants import (
         POLICY_POSTPROCESSOR_DEFAULT_NAME,
         POLICY_PREPROCESSOR_DEFAULT_NAME,
     )
 
-    policy = ACTPolicy.from_pretrained(policy_path, local_files_only=True)
+    policy_type = load_policy_type(policy_path)
+    if not policy_type:
+        raise ValueError(f"{policy_path / 'config.json'} does not contain a policy type.")
+    policy_cls = get_policy_class(policy_type)
+    policy = policy_cls.from_pretrained(policy_path, local_files_only=True)
     if device is not None:
         policy.config.device = device
         policy.to(device)
@@ -120,6 +150,9 @@ def load_act_runtime(policy_path, device):
     preprocessor = PolicyProcessorPipeline.from_pretrained(
         policy_path,
         config_filename=f"{POLICY_PREPROCESSOR_DEFAULT_NAME}.json",
+        overrides={"device_processor": {"device": device}} if device is not None else {},
+        to_transition=batch_to_transition,
+        to_output=transition_to_batch,
     )
     postprocessor = PolicyProcessorPipeline.from_pretrained(
         policy_path,
@@ -127,7 +160,40 @@ def load_act_runtime(policy_path, device):
         to_transition=policy_action_to_transition,
         to_output=transition_to_policy_action,
     )
-    return policy, preprocessor, postprocessor
+    return policy, preprocessor, postprocessor, policy_type
+
+
+def effective_diffusion_num_inference_steps(policy_type, current_value, args):
+    if policy_type != "diffusion":
+        return None
+    if args.num_inference_steps is not None:
+        if args.num_inference_steps <= 0:
+            raise ValueError("--num-inference-steps must be a positive integer.")
+        return args.num_inference_steps
+    if current_value is None:
+        if args.default_diffusion_num_inference_steps <= 0:
+            raise ValueError("--default-diffusion-num-inference-steps must be a positive integer.")
+        return args.default_diffusion_num_inference_steps
+    return None
+
+
+def configure_policy_runtime(policy, policy_type, args):
+    requested = effective_diffusion_num_inference_steps(
+        policy_type,
+        getattr(policy.config, "num_inference_steps", None),
+        args,
+    )
+    if requested is None:
+        return
+
+    policy.config.num_inference_steps = requested
+    if hasattr(policy, "diffusion") and hasattr(policy.diffusion, "num_inference_steps"):
+        policy.diffusion.num_inference_steps = requested
+    print(
+        "Diffusion runtime: "
+        f"num_inference_steps={requested}, "
+        f"n_action_steps={policy.config.n_action_steps}"
+    )
 
 
 def load_input_features(policy_path):
@@ -181,28 +247,48 @@ def environment_state(env, obs, args):
     raise ValueError(f"Unknown env_state_type={args.env_state_type!r}.")
 
 
+def image_feature_camera_name(feature_key):
+    if feature_key == "observation.image":
+        return "agentview"
+    if feature_key == "observation.wrist_image":
+        return "egocentric"
+    if feature_key == "observation.images.agentview":
+        return "agentview"
+    if feature_key == "observation.images.egocentric":
+        return "egocentric"
+    if feature_key.startswith("observation.images."):
+        return feature_key.rsplit(".", 1)[-1]
+    return None
+
+
 def build_policy_input(env, args, input_features):
     obs = env.get_observation()
     frame = {}
 
-    need_agent = "observation.image" in input_features
-    need_wrist = "observation.wrist_image" in input_features
-    if need_agent and need_wrist:
+    image_features = {
+        feature_key: image_feature_camera_name(feature_key)
+        for feature_key in input_features
+        if image_feature_camera_name(feature_key) is not None
+    }
+    needs_agent = any(camera == "agentview" for camera in image_features.values())
+    needs_wrist = any(camera == "egocentric" for camera in image_features.values())
+    cached_images = {}
+    if needs_agent and needs_wrist:
         agent_image, wrist_image = env.grab_image(
             return_side=False,
             width=args.image_size,
             height=args.image_size,
         )
-        frame["observation.image"] = image_to_tensor(agent_image)
-        frame["observation.wrist_image"] = image_to_tensor(wrist_image)
-    elif need_agent:
-        frame["observation.image"] = image_to_tensor(
-            env.get_camera_rgb("agentview", width=args.image_size, height=args.image_size)
-        )
-    elif need_wrist:
-        frame["observation.wrist_image"] = image_to_tensor(
-            env.get_camera_rgb("egocentric", width=args.image_size, height=args.image_size)
-        )
+        cached_images["agentview"] = agent_image
+        cached_images["egocentric"] = wrist_image
+    for feature_key, camera_name in image_features.items():
+        if camera_name not in cached_images:
+            cached_images[camera_name] = env.get_camera_rgb(
+                camera_name,
+                width=args.image_size,
+                height=args.image_size,
+            )
+        frame[feature_key] = image_to_tensor(cached_images[camera_name])
 
     if "observation.state" in input_features:
         state = obs["joint_pos"] if args.proprio_type == "joint_pos" else obs["eef_pose"]
@@ -214,11 +300,37 @@ def build_policy_input(env, args, input_features):
             environment_state(env, obs, args),
             dtype=torch.float32,
         )
+    frame["task"] = args.task or args.env_task or env.cfg.get("task", "")
     return frame
+
+
+def ensure_visual_batch_dims(batch, policy):
+    for feature_key in policy.config.image_features:
+        value = batch.get(feature_key)
+        if isinstance(value, torch.Tensor) and value.dim() == 3:
+            batch[feature_key] = value.unsqueeze(0)
+    return batch
+
+
+def default_output_dir(args, policy_path):
+    if args.output_dir is not None:
+        return args.output_dir
+    if policy_path.name == "pretrained_model" and policy_path.parent.parent.name == "checkpoints":
+        run_name = policy_path.parent.parent.parent.name
+    else:
+        run_name = policy_path.name
+    return f"outputs/eval/{run_name}"
+
+
+def default_job_name(args, policy_type):
+    if args.job_name is not None:
+        return args.job_name
+    return f"{policy_type}_eval"
 
 
 def select_action(policy, preprocessor, postprocessor, frame):
     frame = preprocessor(frame)
+    frame = ensure_visual_batch_dims(frame, policy)
     with torch.inference_mode():
         action = policy.select_action(frame)
         action = postprocessor(action)
@@ -229,11 +341,13 @@ def run_fast_eval(args):
     from src.env import TBlockToBinEnv
 
     policy_path = resolve_lerobot_policy_dir(args.policy_path)
-    output_dir = resolve_path(args.output_dir)
+    output_dir = resolve_path(default_output_dir(args, policy_path))
     output_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"Fast eval policy: {policy_path}")
-    policy, preprocessor, postprocessor = load_act_runtime(policy_path, args.device)
+    policy, preprocessor, postprocessor, policy_type = load_policy_runtime(policy_path, args.device)
+    print(f"Policy type: {policy_type}")
+    configure_policy_runtime(policy, policy_type, args)
     input_features = load_input_features(policy_path)
     env = TBlockToBinEnv(seed=args.seed, action_type=args.env_action_type)
 
@@ -289,6 +403,7 @@ def run_fast_eval(args):
     info = {
         "backend": "fast",
         "policy_path": str(policy_path),
+        "policy_type": policy_type,
         "n_episodes": len(episode_metrics),
         "success_count": success_count,
         "avg_sum_reward": float(np.mean([item["sum_reward"] for item in episode_metrics])),
@@ -315,12 +430,15 @@ def run_fast_eval(args):
 
 
 def build_rename_map(policy_path):
-    rename_map = dict(DEFAULT_RENAME_MAP)
+    rename_map = {}
     config_path = policy_path / "config.json"
     if config_path.exists():
-        with config_path.open("r", encoding="utf-8") as f:
-            config = json.load(f)
+        config = load_policy_config(policy_path)
         input_features = config.get("input_features", {})
+        if "observation.image" in input_features:
+            rename_map["observation.images.agentview"] = "observation.image"
+        if "observation.wrist_image" in input_features:
+            rename_map["observation.images.egocentric"] = "observation.wrist_image"
         if "observation.eef_pose" in input_features:
             rename_map["observation.environment_state"] = "observation.eef_pose"
     return rename_map
@@ -328,7 +446,9 @@ def build_rename_map(policy_path):
 
 def build_command(args, extra_args):
     policy_path = resolve_lerobot_policy_dir(args.policy_path)
-    output_dir = resolve_path(args.output_dir)
+    output_dir = resolve_path(default_output_dir(args, policy_path))
+    config = load_policy_config(policy_path)
+    policy_type = config.get("type")
     rename_map = build_rename_map(policy_path)
     command = [
         lerobot_eval_executable(),
@@ -336,7 +456,7 @@ def build_command(args, extra_args):
         f"--policy.path={policy_path}",
         f"--env.type={args.env_type}",
         f"--output_dir={output_dir}",
-        f"--job_name={args.job_name}",
+        f"--job_name={default_job_name(args, policy_type)}",
         f"--eval.n_episodes={args.episodes}",
         f"--eval.batch_size={args.batch_size}",
         f"--env.episode_length={args.max_steps}",
@@ -353,6 +473,13 @@ def build_command(args, extra_args):
         f"--trust_remote_code={str(args.trust_remote_code).lower()}",
         f"--rename_map={json.dumps(rename_map)}",
     ]
+    runtime_steps = effective_diffusion_num_inference_steps(
+        policy_type,
+        config.get("num_inference_steps"),
+        args,
+    )
+    if runtime_steps is not None:
+        command.append(f"--policy.num_inference_steps={runtime_steps}")
     if args.env_task:
         command.append(f"--env.task={args.env_task}")
     command.extend(extra_args)

@@ -1,0 +1,9 @@
+lerobot_path: /home/zjx/lerobot
+commit: 0f392484458cb5ebca0310c0c4c47390a31c80ed
+branch: main
+
+remotes:
+origin	https://github.com/Seeed-Projects/lerobot.git (fetch)
+origin	https://github.com/Seeed-Projects/lerobot.git (push)
+
+status_short:

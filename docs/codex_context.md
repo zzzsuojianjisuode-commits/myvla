@@ -1,90 +1,42 @@
 # Codex 项目上下文
 
-## 0. 文档作用与维护方式
+本文档是 `/home/zjx/myvla` 的跨会话交接摘要。下一轮对话应先读本文，再读 `docs/project_workflow.md`。
 
-本文档是 myvla 项目的跨会话交接文档，作用是让下一轮对话里的 Codex 能快速接上当前项目目标、用户要求、代码状态、数据状态、模型状态和后续工作方向。每次重要开发或排障结束后，都应该根据本节说明更新本文档，然后把更新后的版本留给下下一轮对话使用。
-
-本文档应持续包含以下内容：
-
-1. 项目总体目标：用户正在搭建什么机器人学习/VLA项目，当前任务是什么。
-2. 参考项目作用：`/home/zjx/Lerobot-MujoCo-VLA-Tutorial` 在本项目中提供哪些设计依据。
-3. 用户长期要求：优先参考 tutorial、优先用 LeRobot 官方训练/推理、显存限制、先 ACT 再 SmolVLA/Diffusion Policy 等。
-4. 当前代码结构：关键脚本、环境、数据集工具、LeRobot/Gym 插件分别负责什么。
-5. 当前数据状态：raw 数据在哪里、repo_id 是什么、episode/frame 数量、schema 里有哪些关键字段。
-6. 当前 transform 状态：有哪些 preset，ACT 当前使用哪份 transformed 数据，输入输出是什么。
-7. 当前模型状态：checkpoint 在哪里，最新可用模型是哪一个，训练数据和 action/proprio 类型是什么。
-8. 已完成的重要修改：本轮或历史上已经完成的关键代码改动和原因。
-9. 当前关键结论：已经验证或排除的问题，例如 eval 为什么慢、推理差是否因为 action_type 不匹配等。
-10. 下一步建议：下一轮最应该先做什么，应该运行哪些命令，哪些风险要优先检查。
-11. 注意事项：不要误删的数据、常见报错含义、训练/推理必须匹配的字段等。
-
-每次更新时建议按下面顺序检查：
-
-1. 如果新增或改动了脚本，更新“当前代码结构”和“已完成的重要修改”。
-2. 如果重新采集或 transform 了数据，更新 episode/frame 数量、路径、repo_id 和 schema。
-3. 如果训练了新模型，更新 checkpoint 路径、训练数据、训练步数、默认推理参数。
-4. 如果定位了新的问题或结论，更新“当前关键结论”和“注意事项”。
-5. 如果下一轮工作重点变化，更新“下一步建议”。
-
-本文档用于下一轮对话快速理解当前项目目标、代码状态、用户要求和后续工作思路。请优先阅读本文，再阅读 `docs/project_workflow.md`。
+维护原则：本文档的目标是让下一轮对话更快理解项目，而不是复盘全部调试过程。更新时应保留当前核心状态、关键决策、稳定结论、风险和下一步；重复的调试流水、已被取代的尝试、临时命令输出和细枝末节应省略或删去，只留下对继续推进项目有帮助的语义。
 
 ## 1. 项目目标
 
-当前项目是 `/home/zjx/myvla`，目标是从 0 搭建一个基于 MuJoCo + LeRobot + VLA/模仿学习策略的机器人学习项目。用户希望按照下面的学习路线推进：
-
-1. 搭建 MuJoCo 仿真环境。
-2. 用键盘遥操作采集演示数据。
-3. 将采集数据转换成适合不同策略的 LeRobot 数据集。
-4. 先训练和评估 ACT。
-5. 后续继续尝试 SmolVLA 和 Diffusion Policy。
-
-当前任务是桌面上的 OMY 机械臂执行：
+项目目标是搭建一个 MuJoCo + LeRobot + 模仿学习/VLA 的机器人学习流程。当前任务：
 
 ```text
 pick up the hollow cylinder and place it into the trash bin
 ```
 
-也就是抓取 `hollow_cylinder` 并放入垃圾桶。环境配置在 `configs/t_block_to_bin.json`，MuJoCo XML 入口是 `task_t_block_to_bin.xml`。
+也就是 OMY 机械臂抓取 `hollow_cylinder` 并放入垃圾桶。任务配置：
 
-当前环境已经简化为只保留两个可移动物体：
+```text
+configs/t_block_to_bin.json
+task_t_block_to_bin.xml
+```
+
+当前场景已简化为两个可移动物体：
 
 ```text
 t_block
 hollow_cylinder
 ```
 
-原先的 `cylinder_small`、`cylinder_tall`、`cylinder_wide` 已从 XML 和配置里的 `objects` / `object_z` 删除。旧的 15 条 raw 数据和 `ckpt/act_joint` 仍来自五物体 clutter 场景，后续应按简化场景重新采集、transform、训练。
+如果 checkpoint 或数据来自旧的五物体 clutter 场景，它与当前简化环境的视觉分布不严格匹配，应重新采集、transform、训练。
 
-## 2. 参考项目的作用
+## 2. 用户长期要求
 
-参考教程项目是：
+1. 优先参考 `/home/zjx/Lerobot-MujoCo-VLA-Tutorial`，不确定时先看 tutorial。
+2. 优先使用 LeRobot 官方训练、评估和推理接口，少手写模型训练逻辑。
+3. 显存有限，优先小模型：ACT、Diffusion Policy、SmolVLA 或轻量自定义模型。
+4. 代码入口要能在 IDE/终端直接运行，默认路径应指向当前正确数据和 checkpoint。
+5. 解释时重点讲清数据格式、transform、策略输入输出、训练/评估流程。
 
-```text
-/home/zjx/Lerobot-MujoCo-VLA-Tutorial
-```
-
-它不是直接复制粘贴的目标，而是本项目的重要范例。它主要提供了这些参考价值：
-
-1. 数据采集范式：先保存包含关节、末端、对象状态、图像和动作的原始 LeRobot 数据集。
-2. transform 思路：不要把所有策略需要的数据混在一个训练集里，而是从 raw 数据转换出策略专用的数据集。
-3. 训练/评估流程：LeRobot 官方模型优先走 `lerobot-train` / `lerobot-eval`，自定义策略可参考 tutorial 的 `train_custom.py`、`transform.py`、eval notebook。
-4. 动作空间选择：raw 数据可以记录 delta eef action，但训练 ACT/Diffusion/SmolVLA 时更推荐生成 joint target 或 eef target 等清晰动作表示。
-
-用户明确要求：不会或不确定的地方要优先参考 tutorial 代码，而不是凭空设计。
-
-## 3. 用户对项目协作方式的要求
-
-用户希望我作为“机器人学习 / VLA / LeRobot / MuJoCo 项目导师”长期协助：
-
-1. 先理解 tutorial，再在 myvla 中实现。
-2. 讲清楚为什么这么做，尤其是数据格式、transform、策略输入输出、训练评估流程。
-3. 尽量使用 LeRobot 官方训练和推理能力，少手写模型训练逻辑。
-4. 模型部署受显存限制，tutorial 里的大 VLA 模型显存不够，优先小模型：ACT、SmolVLA、Diffusion Policy 或自定义轻量模型。
-5. 代码要能在 IDE 里直接运行；默认参数要尽量指向当前正确路径，避免隐式使用旧模型或旧数据。
-
-## 4. 当前代码结构
-
-核心文件：
+## 3. 当前代码结构
 
 ```text
 configs/t_block_to_bin.json               任务、机器人、相机、遥操作参数
@@ -95,38 +47,38 @@ src/viewer/keyboard_viewer.py             GLFW 可视化和固定相机截图
 src/dataset/utils.py                      LeRobot 数据集 schema 和帧构造
 src/lerobot_myvla/__init__.py             LeRobot/Gym eval 插件
 scripts/keyboard_teleop.py                键盘遥操作采集 raw 数据
-scripts/transform_lerobot_dataset.py      raw -> 多种策略专用数据集
-scripts/train_act.py                      LeRobot 官方 ACT 训练封装
-scripts/eval_act.py                       ACT 快速评估/官方评估封装
-scripts/infer_act_once.py                 ACT 单次实时推理展示
+scripts/transform_lerobot_dataset.py      raw -> 策略专用 LeRobot 数据集
+scripts/train.py                          ACT/Diffusion/SmolVLA 训练入口
+scripts/infer_once.py                     单次实时推理入口
+scripts/eval.py                           fast/official 评估入口
 ```
 
-## 5. 当前数据状态
+旧文件名 `train_act.py`、`infer_act_once.py`、`eval_act.py` 已重命名为上面的三个统一入口。
+
+## 4. 当前数据状态
 
 raw 遥操作数据：
 
 ```text
 root: dataset/teleoperation_dataset
 repo_id: t_block_to_bin
-episodes: 15
-frames: 1569
+episodes: 25
+frames: 2517
 fps: 20
 ```
 
-raw 数据现在是新 schema，包含：
+raw 数据是信息尽量完整的中间数据，主要字段：
 
 ```text
-observation.image
-observation.wrist_image
+observation.image              agentview 图像
+observation.wrist_image        egocentric/wrist 图像
 observation.state              joint_pos
 action                         delta_eef_action
 observation.eef_pose
 env.obj_pose / env.obj_names
 env.target_pos / env.bin_pos
-raw.joint_pos_before
-raw.joint_pos_after
-raw.eef_pose_before
-raw.eef_pose_after
+raw.joint_pos_before / raw.joint_pos_after
+raw.eef_pose_before / raw.eef_pose_after
 raw.delta_eef_action
 raw.target_joint_pos
 raw.target_eef_pose
@@ -134,76 +86,29 @@ raw.success
 task
 ```
 
-ACT 默认训练数据：
+当前默认训练数据：
 
 ```text
 root: dataset/transforms/image_joint
 repo_id: t_block_to_bin_image_joint
-episodes: 15
-frames: 1569
+episodes: 25
+frames: 2517
 fps: 20
 ```
 
-ACT 数据格式：
+`image_joint` schema：
 
 ```text
 observation.state        joint_pos, shape=(7,)
 action                   joint target, shape=(7,)
 observation.image        agentview RGB, shape=(256, 256, 3)
 observation.wrist_image  egocentric RGB, shape=(256, 256, 3)
+task
 ```
 
-这份数据由下面命令生成：
+## 5. Transform 状态
 
-```bash
-/home/zjx/miniconda3/envs/vla/bin/python scripts/transform_lerobot_dataset.py \
-  --preset act \
-  --overwrite
-```
-
-`scripts/transform_lerobot_dataset.py` 现在默认 `--preset act`，所以不传 `--preset` 时也会输出到 `dataset/transforms/image_joint`，与 `scripts/train_act.py` 默认训练路径一致。
-
-注意：LeRobot 不会自动“聪明地选择 joint 字段”。我们通过 transform 生成策略专用数据集，再让训练脚本指向正确数据集。
-
-## 6. 当前模型状态
-
-当前 ACT 模型输出目录：
-
-```text
-ckpt/act_joint
-```
-
-已经存在数字 checkpoint：
-
-```text
-ckpt/act_joint/checkpoints/001000 ... 025000
-```
-
-同时有：
-
-```text
-ckpt/act_joint/checkpoints/last/pretrained_model
-```
-
-`infer_act_once.py` 和 `eval_act.py` 已经支持自动解析：
-
-1. 直接传 `ckpt/act_joint`
-2. 传 `ckpt/act_joint/checkpoints/last/pretrained_model`
-3. 没有 `last` 时自动选择最新数字 checkpoint 的 `pretrained_model`
-
-## 7. 已完成的重要修改
-
-### 7.1 数据采集改造
-
-`scripts/keyboard_teleop.py` 已改成记录动作前观测和动作后状态，避免旧数据里的“执行动作后才保存 observation”的错位问题。
-
-新采集数据会保存更丰富 raw 字段，方便以后生成 ACT、SmolVLA、Diffusion Policy 或自定义策略数据集。
-
-### 7.2 transform 脚本
-
-新增 `scripts/transform_lerobot_dataset.py`。
-
-支持 preset：
+`scripts/transform_lerobot_dataset.py` 支持这些 preset：
 
 ```text
 act -> image_joint
@@ -220,122 +125,160 @@ object_delta_eef
 all
 ```
 
-其中 `act` 默认输出：
+当前 ACT、Diffusion Policy、SmolVLA 都先共用 `image_joint`。这不是永久限制，而是当前最稳妥的 baseline。后续如果某个模型需要不同输入，只需新增/调整 transform preset，并修改 `scripts/train.py` 中的 policy->preset 映射。
 
-```text
-dataset/transforms/image_joint
-repo_id=t_block_to_bin_image_joint
+训练脚本现在会自动检查数据；如果目标 transformed dataset 不存在，会按 `--policy-type` 自动调用 transform。`--force-transform` 会无条件重建 transformed dataset，只应在新增 raw 数据、修改 transform 逻辑或修改相机/schema 后使用：
+
+```bash
+/home/zjx/miniconda3/envs/vla/bin/python scripts/train.py --force-transform
 ```
 
-transform 脚本默认 preset 已统一为 `act`，避免无参数 transform 写到旧的 `dataset/transformed_act_dataset` 后训练脚本找不到数据。
+## 6. 训练、推理、评估入口
 
-### 7.3 ACT 训练脚本
+训练 ACT：
 
-`scripts/train_act.py` 当前默认：
-
-```text
---dataset-root dataset/transforms/image_joint
---repo-id t_block_to_bin_image_joint
---output-dir ckpt/act_joint
---job-name act_joint
---steps 30000
---batch-size 4
+```bash
+/home/zjx/miniconda3/envs/vla/bin/python scripts/train.py
 ```
 
-它调用官方：
+训练 Diffusion Policy：
 
-```text
-lerobot-train --policy.type=act
+```bash
+/home/zjx/miniconda3/envs/vla/bin/python scripts/train.py --policy-type diffusion
 ```
 
-并且增加了本地数据集存在性检查。如果 transform 没跑，会直接提示先运行 transform，避免 LeRobot 因找不到本地数据而去 HuggingFace Hub 查 repo，导致误导性的 `Repository Not Found`。
+训练 SmolVLA：
 
-### 7.4 ACT 单次实时推理
-
-`scripts/infer_act_once.py` 默认：
-
-```text
---policy-path ckpt/act_joint
---action-type joint
---proprio-type joint_pos
---seed omitted -> random scene each run
+```bash
+/home/zjx/miniconda3/envs/vla/bin/python scripts/train.py --policy-type smolvla
 ```
 
-如果需要复现完全相同的场景和动作，可以显式传 `--seed 0` 等固定整数。ACT 在 eval 模式下是确定性策略，同一 checkpoint + 同一场景 + 同一观测会输出相同动作。
-
-它使用 GLFW viewer 实时显示推理效果，适合人工确认模型行为。
-
-### 7.5 ACT 评估脚本
-
-`scripts/eval_act.py` 现在有两个 backend：
+SmolVLA 默认从本地加载预训练模型再微调，不建议从零训练。它需要两个本地目录：
 
 ```text
---backend fast      默认，不录视频，速度接近单次推理
---backend official  调用官方 lerobot-eval，会录视频，速度更慢
+pretrained/smolvla_base
+pretrained/SmolVLM2-500M-Video-Instruct
 ```
 
-fast backend 会在终端明确打印 `success_rate=...% (成功数/总数)`，同时保存到 `outputs/eval/act_joint/eval_info.json` 的 `pc_success` / `success_count` 字段。
+只下载 `pretrained/smolvla_base` 不够，因为 SmolVLA 内部还会加载 VLM backbone/tokenizer。`scripts/train.py` 会生成 `pretrained/smolvla_base_local`，把 config 和 tokenizer 路径本地化后传给 `lerobot-train`。生成本地化配置时会读取当前 transformed dataset 的 `meta/info.json`，把预训练 SmolVLA 默认的三相机/6 维 schema 改成项目当前的两路图像 `observation.image`、`observation.wrist_image` 和 7 维 state/action。ACT 和 Diffusion Policy 默认从本地演示数据从零训练。`pretrained/` 已在 `.gitignore` 中忽略，不应提交权重文件。
 
-官方 eval 慢的原因已经定位：
+训练默认只保留最优 checkpoint：`scripts/train.py` 会通过 `scripts/lerobot_train_best.py` 调用 LeRobot 训练流程，把 checkpoint 固定保存到 `<output_dir>/checkpoints/best/pretrained_model`，并让 `last -> best`。best 按 checkpoint 保存候选时刻的训练 loss 选择，候选频率由 `--save-freq` 控制。需要恢复 LeRobot 原始的完整历史保存时，加 `--checkpoint-mode all`。
 
-1. LeRobot eval 固定 `max_episodes_rendered=10`，会为前 10 个 episode 录视频。
-2. 每个 step 已经要渲染 agentview 和 egocentric 作为策略输入。
-3. official eval 又额外调用 `env.render()` 渲染 agentview 作为视频帧。
-4. 之前 `TBlockToBinEnv.get_camera_rgb()` 每次新建 `mujoco.Renderer`，现已改为按分辨率缓存 renderer。
+单次实时推理：
 
-## 8. 当前关键结论
+```bash
+/home/zjx/miniconda3/envs/vla/bin/python scripts/infer_once.py
+```
 
-1. raw 数据必须尽量多保存，不要只保存某一个模型需要的字段。
-2. transform 后应该生成多个策略专用数据集，不要把所有字段都塞进同一个 LeRobot 训练集。
-3. ACT 当前应使用 `image_joint` 数据：
+快速评估：
+
+```bash
+/home/zjx/miniconda3/envs/vla/bin/python scripts/eval.py
+```
+
+`eval.py` 默认 `--backend fast`，会直接打印成功率并保存 `eval_info.json`。`--backend official` 会调用 `lerobot-eval` 并录视频，明显更慢。
+
+Diffusion Policy 的当前 checkpoint 没有显式保存 `num_inference_steps`，LeRobot 默认会用 100 个 DDPM 去噪步，导致每隔一个 action chunk 明显卡顿。`infer_once.py` 和 `eval.py` 已默认在这种情况下使用 16 个去噪步；需要恢复完整成本时传 `--num-inference-steps 100`。
+
+## 7. 当前 checkpoint 状态
+
+当前保留的 checkpoint：
+
+```text
+ckpt/act_joint/checkpoints/last/pretrained_model
+ckpt/diffusion_joint/checkpoints/last/pretrained_model
+ckpt/smolvla_joint/checkpoints/last/pretrained_model
+```
+
+`infer_once.py` 和 `eval.py` 会自动解析：
+
+1. `ckpt/act_joint`
+2. `ckpt/act_joint/checkpoints/last/pretrained_model`
+3. `ckpt/act_joint/checkpoints/best/pretrained_model`
+4. 最新数字 checkpoint 下的 `pretrained_model`
+
+注意：如果刚改过环境、相机、数据 schema 或重新采集 raw 数据，不要默认信任旧 checkpoint；应重新 `--force-transform` 并训练。
+
+## 8. 当前图像输入结论
+
+目前 ACT、Diffusion Policy、SmolVLA 默认吃同一组图像：
+
+```text
+observation.image        -> MuJoCo camera: agentview
+observation.wrist_image  -> MuJoCo camera: egocentric
+```
+
+这是合理的第一版 baseline：
+
+1. `agentview` 提供桌面、物体、垃圾桶和机械臂的全局关系。
+2. `egocentric` 提供夹爪附近的局部抓取/投放视角。
+3. 当前数据量只有 25 episodes，先不要盲目增加更多视觉输入，避免复杂度和过拟合一起上升。
+
+更好的下一步视觉实验是做 camera ablation：
+
+```text
+A. agentview + egocentric              当前 baseline
+B. topview + egocentric                值得优先尝试
+C. agentview + topview + egocentric    数据量更多后再试
+D. sideview                            可辅助观察，不建议单独主用
+```
+
+重要限制：当前 raw 数据只保存了 `agentview` 和 `egocentric`。`topview` 和 `sideview` 虽可在 MuJoCo 中渲染，但没有写入当前 dataset。若要训练这些相机，需要先改采集 schema/transform，并重新采集数据。
+
+实现细节：LeRobot 的 `to_batch_processor` 会自动给 `observation.image` 和 `observation.images.*` 加 batch 维，但不会自动处理自定义 key `observation.wrist_image`。`scripts/infer_once.py` 和 `scripts/eval.py` 已在调用 `policy.select_action` 前统一补齐所有视觉输入的 batch 维，避免 Diffusion Policy 多相机 `torch.stack` 时出现 `[1,3,H,W]` 和 `[3,H,W]` 混用。
+
+## 9. 关键结论
+
+1. raw 数据必须尽量完整保存；训练数据通过 transform 变成“策略专用干净数据集”。
+2. 不要把所有 `observation.*` 都塞进训练集让 LeRobot 自动选择，容易造成训练/推理特征不匹配。
+3. 当前主线使用 `image_joint`：
    ```text
-   joint_pos + 双相机图像 -> joint target
+   joint_pos + agentview + egocentric -> joint target
    ```
-4. 之前推理差，主要曾经是因为使用了旧的 `act_delta_eef` 模型或 action_type 不匹配，不应把问题直接归因于任务太复杂。
-5. 15 个 episode 只能做 pipeline sanity check。要让视觉策略稳定，建议继续采集到至少 50 个成功 episode。
-
-## 9. 下一步建议
-
-优先顺序：
-
-1. 确认 `ckpt/act_joint` 的单次推理效果：
-   ```bash
-   /home/zjx/miniconda3/envs/vla/bin/python scripts/infer_act_once.py
+4. 推理动作异常时，优先检查：
+   ```text
+   训练数据 action 类型
+   checkpoint
+   推理/eval action_type 和 proprio_type
    ```
-2. 快速评估：
-   ```bash
-   /home/zjx/miniconda3/envs/vla/bin/python scripts/eval_act.py
-   ```
-3. 如果效果仍不稳定，继续采集更多成功 episode：
+5. 当前 `ckpt/act_joint` 在 20 个 eval seed 上曾约为 2/20 成功。主要失败模式是未稳定抓住 hollow cylinder、抓错物体或抓住后未投放，更像数据量/数据质量不足，而不是成功率计算错误。
+6. 25 episodes 仍主要适合验证 pipeline。视觉策略稳定训练建议至少 50 个成功 episode，最好更多。
+
+## 10. 下一步建议
+
+推荐顺序：
+
+1. 继续采集高质量成功演示，优先把成功 episode 提到 50+：
    ```bash
    /home/zjx/miniconda3/envs/vla/bin/python scripts/keyboard_teleop.py \
      --dataset-root dataset/teleoperation_dataset \
      --repo-id t_block_to_bin \
      --resume
    ```
-4. 每次新增 raw 数据后重新 transform：
-   ```bash
-   /home/zjx/miniconda3/envs/vla/bin/python scripts/transform_lerobot_dataset.py \
-     --preset act \
-     --overwrite
-   ```
-5. 重新训练 ACT：
-   ```bash
-   /home/zjx/miniconda3/envs/vla/bin/python scripts/train_act.py
-   ```
-6. ACT 跑通后，再补 SmolVLA 和 Diffusion Policy 的训练/评估脚本，优先复用 transform 输出的数据集。
 
-## 10. 注意事项
+2. 新增 raw 数据或修改 schema 后，训练前强制重新 transform：
+   ```bash
+   /home/zjx/miniconda3/envs/vla/bin/python scripts/train.py --force-transform
+   ```
 
-1. 不要随意删除 `.gitignore`、现有 checkpoint、dataset。
+   如果只是切换 ACT/Diffusion/SmolVLA 训练，当前三者共用 `image_joint`，不要加 `--force-transform`。
+
+3. 单次推理观察行为：
+   ```bash
+   /home/zjx/miniconda3/envs/vla/bin/python scripts/infer_once.py
+   ```
+
+4. 批量评估成功率：
+   ```bash
+   /home/zjx/miniconda3/envs/vla/bin/python scripts/eval.py
+   ```
+
+5. ACT baseline 稳定后，再比较 Diffusion Policy；SmolVLA 需要本地预训练权重、依赖和显存，默认是微调路线。
+
+## 11. 注意事项
+
+1. 不要随意删除 `.gitignore`、`dataset/`、`ckpt/`、`outputs/`。
 2. `dataset/`、`ckpt/`、`outputs/` 通常被 `.gitignore` 忽略。
-3. 如果训练报 HuggingFace `Repository Not Found`，优先检查本地 `--dataset.root` 是否存在 `meta/info.json` 和 `meta/tasks.parquet`。
-4. 如果推理效果异常，优先检查三者是否匹配：
-   ```text
-   训练数据 action 类型
-   checkpoint
-   推理 env action_type
-   ```
-5. official eval 慢是正常的；调试时默认用 `--backend fast`。
-6. 单次推理如果不传 `--seed`，每次运行会随机重置场景；如果传固定 seed，则场景和确定性策略动作都会复现。
-7. 当前 `ckpt/act_joint` 在 20 个 eval seed 上约为 2/20 成功。诊断显示主要失败模式是未稳定抓住 hollow cylinder、少数抓错物体或抓住后未投放；这更像 15 条视觉演示数据量不足导致的泛化问题，而不是 eval 成功率计算错误。
+3. 如果训练报 HuggingFace `Repository Not Found`，优先检查本地 `dataset.root` 是否存在 `meta/info.json` 和 `meta/tasks.parquet`。
+4. 单次推理不传 `--seed` 会随机重置场景；传固定 seed 可复现实验。
+5. official eval 慢是正常的；调试成功率优先用默认 fast backend。

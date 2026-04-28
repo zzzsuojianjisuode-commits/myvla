@@ -102,7 +102,7 @@ def parse_args():
         default="act",
         help=(
             "Named transform recipe. Defaults to act, which writes the dataset used by "
-            "scripts/train_act.py. act/diffusion/smolvla currently map to image_joint. "
+            "scripts/train.py. act/diffusion/smolvla currently map to image_joint. "
             "Use all to generate every canonical dataset under --output-root."
         ),
     )

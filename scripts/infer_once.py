@@ -14,9 +14,14 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from lerobot.policies.act.modeling_act import ACTPolicy
+from lerobot.policies.factory import get_policy_class
 from lerobot.processor import PolicyProcessorPipeline
-from lerobot.processor.converters import policy_action_to_transition, transition_to_policy_action
+from lerobot.processor.converters import (
+    batch_to_transition,
+    policy_action_to_transition,
+    transition_to_batch,
+    transition_to_policy_action,
+)
 from lerobot.utils.constants import (
     POLICY_POSTPROCESSOR_DEFAULT_NAME,
     POLICY_PREPROCESSOR_DEFAULT_NAME,
@@ -26,7 +31,7 @@ from src.env import TBlockToBinEnv
 from src.viewer import KeyboardTeleopViewer
 
 
-CONTROLS = """ACT live inference
+CONTROLS = """BC policy live inference
 Esc: quit
 R: reset episode
 P: pause/resume
@@ -35,7 +40,7 @@ P: pause/resume
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Run one ACT policy rollout with realtime MuJoCo display."
+        description="Run one LeRobot behavior cloning policy rollout with realtime MuJoCo display."
     )
     parser.add_argument("--policy-path", default="ckpt/act_joint")
     parser.add_argument("--max-steps", type=int, default=600)
@@ -66,9 +71,22 @@ def parse_args():
     )
     parser.add_argument("--object-pad", type=int, default=10)
     parser.add_argument("--device", default=None)
+    parser.add_argument("--task", default=None)
+    parser.add_argument(
+        "--num-inference-steps",
+        type=int,
+        default=None,
+        help="Runtime denoising steps for Diffusion Policy. Pass 100 to restore the checkpoint's full DDPM cost.",
+    )
+    parser.add_argument(
+        "--default-diffusion-num-inference-steps",
+        type=int,
+        default=16,
+        help="Used when a Diffusion checkpoint leaves num_inference_steps unset.",
+    )
     parser.add_argument("--show-camera-previews", action="store_true")
     parser.add_argument("--print-freq", type=int, default=10)
-    parser.add_argument("--trace-path", default="outputs/infer_act_once_trace.csv")
+    parser.add_argument("--trace-path", default="outputs/infer_once_trace.csv")
     parser.add_argument("--no-trace", action="store_true")
     return parser.parse_args()
 
@@ -104,10 +122,16 @@ def resolve_lerobot_policy_dir(path):
     )
 
 
-def load_processors(policy_path):
+def load_processors(policy_path, device=None):
+    overrides = {}
+    if device is not None:
+        overrides["device_processor"] = {"device": device}
     preprocessor = PolicyProcessorPipeline.from_pretrained(
         policy_path,
         config_filename=f"{POLICY_PREPROCESSOR_DEFAULT_NAME}.json",
+        overrides=overrides,
+        to_transition=batch_to_transition,
+        to_output=transition_to_batch,
     )
     postprocessor = PolicyProcessorPipeline.from_pretrained(
         policy_path,
@@ -125,8 +149,52 @@ def load_input_features(policy_path):
     return set(config.get("input_features", {}))
 
 
+def load_policy_type(policy_path):
+    config_path = policy_path / "config.json"
+    with config_path.open("r", encoding="utf-8") as f:
+        config = json.load(f)
+    return config.get("type")
+
+
+def load_policy(policy_path, device):
+    policy_type = load_policy_type(policy_path)
+    if not policy_type:
+        raise ValueError(f"{policy_path / 'config.json'} does not contain a policy type.")
+    policy_cls = get_policy_class(policy_type)
+    policy = policy_cls.from_pretrained(policy_path, local_files_only=True)
+    if device is not None:
+        policy.config.device = device
+        policy.to(device)
+    policy.eval()
+    return policy, policy_type
+
+
+def configure_policy_runtime(policy, policy_type, args):
+    if policy_type != "diffusion":
+        return
+
+    requested = args.num_inference_steps
+    if requested is None and getattr(policy.config, "num_inference_steps", None) is None:
+        if args.default_diffusion_num_inference_steps <= 0:
+            raise ValueError("--default-diffusion-num-inference-steps must be a positive integer.")
+        requested = args.default_diffusion_num_inference_steps
+    if requested is None:
+        return
+    if requested <= 0:
+        raise ValueError("--num-inference-steps must be a positive integer.")
+
+    policy.config.num_inference_steps = requested
+    if hasattr(policy, "diffusion") and hasattr(policy.diffusion, "num_inference_steps"):
+        policy.diffusion.num_inference_steps = requested
+    print(
+        "Diffusion runtime: "
+        f"num_inference_steps={requested}, "
+        f"n_action_steps={policy.config.n_action_steps}"
+    )
+
+
 def make_viewer(env, args):
-    viewer = KeyboardTeleopViewer(env.model, env.data, title="ACT live inference")
+    viewer = KeyboardTeleopViewer(env.model, env.data, title="BC policy live inference")
     viewer_cfg = env.cfg.get("viewer", {}).get("keyboard", {})
     viewer.set_camera(
         lookat=viewer_cfg.get("lookat", [0.4, 0.0, 0.6]),
@@ -178,29 +246,34 @@ def environment_state(env, obs, args):
     raise ValueError(f"Unknown env_state_type={args.env_state_type!r}.")
 
 
+def image_feature_camera_name(feature_key):
+    if feature_key == "observation.image":
+        return "agentview"
+    if feature_key == "observation.wrist_image":
+        return "egocentric"
+    if feature_key == "observation.images.agentview":
+        return "agentview"
+    if feature_key == "observation.images.egocentric":
+        return "egocentric"
+    if feature_key.startswith("observation.images."):
+        return feature_key.rsplit(".", 1)[-1]
+    return None
+
+
 def build_policy_input(env, viewer, args, input_features):
     obs = env.get_observation()
     frame = {}
-    if "observation.image" in input_features:
-        agent_image = viewer.capture_fixed_camera_rgb(
-            "agentview",
+    for feature_key in input_features:
+        camera_name = image_feature_camera_name(feature_key)
+        if camera_name is None:
+            continue
+        image = viewer.capture_fixed_camera_rgb(
+            camera_name,
             width=args.image_size,
             height=args.image_size,
         )
-        agent_image = np.ascontiguousarray(agent_image)
-        frame["observation.image"] = (
-            torch.from_numpy(agent_image).permute(2, 0, 1).float() / 255.0
-        )
-    if "observation.wrist_image" in input_features:
-        wrist_image = viewer.capture_fixed_camera_rgb(
-            "egocentric",
-            width=args.image_size,
-            height=args.image_size,
-        )
-        wrist_image = np.ascontiguousarray(wrist_image)
-        frame["observation.wrist_image"] = (
-            torch.from_numpy(wrist_image).permute(2, 0, 1).float() / 255.0
-        )
+        image = np.ascontiguousarray(image)
+        frame[feature_key] = torch.from_numpy(image).permute(2, 0, 1).float() / 255.0
     if "observation.state" in input_features:
         state = obs["joint_pos"] if args.proprio_type == "joint_pos" else obs["eef_pose"]
         frame["observation.state"] = torch.tensor(state, dtype=torch.float32)
@@ -211,11 +284,21 @@ def build_policy_input(env, viewer, args, input_features):
             environment_state(env, obs, args),
             dtype=torch.float32,
         )
+    frame["task"] = args.task or env.cfg.get("task", "")
     return frame
+
+
+def ensure_visual_batch_dims(batch, policy):
+    for feature_key in policy.config.image_features:
+        value = batch.get(feature_key)
+        if isinstance(value, torch.Tensor) and value.dim() == 3:
+            batch[feature_key] = value.unsqueeze(0)
+    return batch
 
 
 def select_action(policy, preprocessor, postprocessor, frame):
     frame = preprocessor(frame)
+    frame = ensure_visual_batch_dims(frame, policy)
     with torch.inference_mode():
         action = policy.select_action(frame)
         action = postprocessor(action)
@@ -293,12 +376,10 @@ def main():
     print(f"Loading policy: {policy_path}")
     print(f"Episode seed: {'random' if args.seed is None else args.seed}")
 
-    policy = ACTPolicy.from_pretrained(policy_path, local_files_only=True)
-    if args.device is not None:
-        policy.config.device = args.device
-        policy.to(args.device)
-    policy.eval()
-    preprocessor, postprocessor = load_processors(policy_path)
+    policy, policy_type = load_policy(policy_path, args.device)
+    print(f"Policy type: {policy_type}")
+    configure_policy_runtime(policy, policy_type, args)
+    preprocessor, postprocessor = load_processors(policy_path, args.device)
     input_features = load_input_features(policy_path)
 
     env = TBlockToBinEnv(seed=args.seed, action_type=args.action_type)
@@ -361,6 +442,7 @@ def main():
                 CONTROLS,
                 (
                     f"policy: {policy_path}\n"
+                    f"type: {policy_type}\n"
                     f"step: {step}/{args.max_steps}\n"
                     f"paused: {paused}\n"
                     f"success: {bool(obs['success'][0])}\n"
