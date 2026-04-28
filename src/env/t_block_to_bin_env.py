@@ -119,6 +119,7 @@ class TBlockToBinEnv:
         self.model = mujoco.MjModel.from_xml_path(str(self.root / self.cfg["xml_file"]))
         self.data = mujoco.MjData(self.model)
         self.rng = np.random.default_rng(seed)
+        self._renderers = {}
 
         self.action_type = action_type or self.cfg.get("control_mode", "delta_eef_pose")
         self.robot_joint_names = self.cfg["robot_joint_names"]
@@ -361,11 +362,18 @@ class TBlockToBinEnv:
         return agent, wrist
 
     def get_camera_rgb(self, camera_name="agentview", width=640, height=480):
-        renderer = mujoco.Renderer(self.model, height=height, width=width)
+        key = (int(width), int(height))
+        renderer = self._renderers.get(key)
+        if renderer is None:
+            renderer = mujoco.Renderer(self.model, height=height, width=width)
+            self._renderers[key] = renderer
         renderer.update_scene(self.data, camera=camera_name)
-        rgb = renderer.render()
-        renderer.close()
-        return rgb
+        return renderer.render().copy()
+
+    def close(self):
+        for renderer in self._renderers.values():
+            renderer.close()
+        self._renderers.clear()
 
     def get_body_pos(self, body_name):
         body_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, body_name)
@@ -426,6 +434,16 @@ class TBlockToBinEnv:
         pos, rot = self.get_end_effector_pose()
         return np.concatenate([pos, _rot_to_rpy(rot)], dtype=np.float32)
 
+    def get_control_target_joint_pos(self):
+        return self.q.astype(np.float32).copy()
+
+    def get_control_target_eef_pose(self):
+        gripper_state = float(self.q[-1] > 0.5)
+        return np.concatenate(
+            [self.p0, _rot_to_rpy(self.R0), [gripper_state]],
+            dtype=np.float32,
+        )
+
     def get_object_pose(self, pad=10):
         poses = np.zeros((pad, 6), dtype=np.float32)
         names = []
@@ -443,6 +461,33 @@ class TBlockToBinEnv:
             "names": [f"pad_{idx}" for idx in range(pad)],
         }
         return {"poses": poses, "names": names}, receptacle_q
+
+    def set_object_pose(self, obj_pose, obj_names, obj_q_states=None, obj_q_names=None):
+        if isinstance(obj_names, str):
+            obj_names = [name for name in obj_names.split(",") if name]
+        obj_pose = np.asarray(obj_pose, dtype=np.float64)
+        for name, pose in zip(obj_names, obj_pose):
+            if not name or name.startswith("pad_") or name not in self.free_joint_addrs:
+                continue
+            pos = pose[:3]
+            quat = _rot_to_quat(_rpy_to_rot(pose[3:6]))
+            qpos_addr = self.free_joint_addrs[name]
+            self.data.qpos[qpos_addr : qpos_addr + 3] = pos
+            self.data.qpos[qpos_addr + 3 : qpos_addr + 7] = quat
+
+        if obj_q_states is not None and obj_q_names is not None:
+            if isinstance(obj_q_names, str):
+                obj_q_names = [name for name in obj_q_names.split(",") if name]
+            obj_q_states = np.asarray(obj_q_states, dtype=np.float64)
+            for name, value in zip(obj_q_names, obj_q_states):
+                if not name or name.startswith("pad_"):
+                    continue
+                joint_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, name)
+                if joint_id < 0:
+                    continue
+                self.data.qpos[self.model.jnt_qposadr[joint_id]] = value
+
+        mujoco.mj_forward(self.model, self.data)
 
     def check_success(self):
         target_site_id = mujoco.mj_name2id(

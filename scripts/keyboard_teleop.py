@@ -15,6 +15,7 @@ if str(ROOT) not in sys.path:
 from src.controllers import load_controller
 from src.dataset import (
     build_teleoperation_frame,
+    filter_frame_to_dataset_features,
     make_teleoperation_dataset,
     write_episode_images,
 )
@@ -82,6 +83,12 @@ def open_recording_dataset(args, fps):
             from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
             dataset = LeRobotDataset(args.repo_id, root=dataset_root)
+            if "raw.joint_pos_before" not in dataset.features:
+                print(
+                    "Warning: resuming an older dataset schema; new raw fields will be "
+                    "filtered out. Use --overwrite or a new --dataset-root to collect "
+                    "the richer raw format."
+                )
             return dataset, dataset.num_episodes
         elif has_info and not has_tasks:
             shutil.rmtree(dataset_root)
@@ -151,6 +158,7 @@ def main():
     episode_frame_count = 0
     episode_images = []
     last_action = np.zeros(7, dtype=np.float32)
+    pending_record = None
 
     viewer = KeyboardTeleopViewer(env.model, env.data, title="OMY keyboard teleop")
     viewer_cfg = env.cfg.get("viewer", {}).get("keyboard", {})
@@ -168,12 +176,13 @@ def main():
     obs = env.get_observation()
 
     def reset_sim():
-        nonlocal next_control_time, wall_start, sim_start, obs
+        nonlocal next_control_time, wall_start, sim_start, obs, pending_record
         obs = env.reset(leader_pose=False)
         controller.reset(env)
         next_control_time = env.data.time
         wall_start = time.time()
         sim_start = env.data.time
+        pending_record = None
 
     def discard_episode(reason="discard"):
         nonlocal recording, episode_frame_count
@@ -238,11 +247,41 @@ def main():
 
             should_record_frame = False
             if env.data.time >= next_control_time:
+                obs_before = env.get_observation()
+                agent_image = None
+                wrist_image = None
+                obj_states = None
+                obj_q_states = None
+                if dataset is not None and recording:
+                    agent_image = viewer.capture_fixed_camera_rgb(
+                        "agentview",
+                        width=args.image_size,
+                        height=args.image_size,
+                    )
+                    wrist_image = viewer.capture_fixed_camera_rgb(
+                        "egocentric",
+                        width=args.image_size,
+                        height=args.image_size,
+                    )
+                    obj_states, obj_q_states = env.get_object_pose(pad=args.object_pad)
                 action = controller.get_action(viewer)
                 last_action = action.astype(np.float32)
                 env.step(action)
+                target_joint_pos = env.get_control_target_joint_pos()
+                target_eef_pose = env.get_control_target_eef_pose()
                 next_control_time += control_period
                 should_record_frame = dataset is not None and recording
+                if should_record_frame:
+                    pending_record = {
+                        "obs_before": obs_before,
+                        "action": last_action.copy(),
+                        "agent_image": agent_image,
+                        "wrist_image": wrist_image,
+                        "obj_states": obj_states,
+                        "obj_q_states": obj_q_states,
+                        "target_joint_pos": target_joint_pos,
+                        "target_eef_pose": target_eef_pose,
+                    }
 
             obs = env.step_env(n_substeps=sim_substeps)
             eef_pos, eef_rot = env.get_end_effector_pose()
@@ -254,34 +293,31 @@ def main():
                 env.get_projection_plane_z(),
             )
 
-            if should_record_frame:
-                agent_image = viewer.capture_fixed_camera_rgb(
-                    "agentview",
-                    width=args.image_size,
-                    height=args.image_size,
-                )
-                wrist_image = viewer.capture_fixed_camera_rgb(
-                    "egocentric",
-                    width=args.image_size,
-                    height=args.image_size,
-                )
+            if pending_record is not None:
                 frame = build_teleoperation_frame(
                     env=env,
-                    action=last_action,
+                    action=pending_record["action"],
                     task=task,
                     config_file_name=config_file_name,
                     image_size=args.image_size,
                     object_pad=args.object_pad,
-                    agent_image=agent_image,
-                    wrist_image=wrist_image,
+                    agent_image=pending_record["agent_image"],
+                    wrist_image=pending_record["wrist_image"],
+                    obs_before=pending_record["obs_before"],
+                    obs_after=obs,
+                    target_joint_pos=pending_record["target_joint_pos"],
+                    target_eef_pose=pending_record["target_eef_pose"],
+                    obj_states=pending_record["obj_states"],
+                    obj_q_states=pending_record["obj_q_states"],
                 )
-                dataset.add_frame(frame)
+                dataset.add_frame(filter_frame_to_dataset_features(frame, dataset))
                 episode_images.append(
                     {
-                        "observation.image": agent_image.copy(),
-                        "observation.wrist_image": wrist_image.copy(),
+                        "observation.image": pending_record["agent_image"].copy(),
+                        "observation.wrist_image": pending_record["wrist_image"].copy(),
                     }
                 )
+                pending_record = None
                 episode_frame_count += 1
                 if (
                     not args.no_auto_save_on_success

@@ -33,12 +33,12 @@ def make_teleoperation_dataset(
         "observation.state": {
             "dtype": "float32",
             "shape": (state_dim,),
-            "names": ["state"],
+            "names": ["joint_pos"],
         },
         "action": {
             "dtype": "float32",
             "shape": (action_dim,),
-            "names": ["action"],
+            "names": ["delta_eef_action"],
         },
         "observation.eef_pose": {
             "dtype": "float32",
@@ -65,10 +65,60 @@ def make_teleoperation_dataset(
             "shape": (object_pad,),
             "names": ["obj_q_states"],
         },
+        "env.target_pos": {
+            "dtype": "float32",
+            "shape": (3,),
+            "names": ["xyz"],
+        },
+        "env.bin_pos": {
+            "dtype": "float32",
+            "shape": (3,),
+            "names": ["xyz"],
+        },
         "env.config_file_name": {
             "dtype": "string",
             "shape": (1,),
             "names": ["file_name"],
+        },
+        "raw.joint_pos_before": {
+            "dtype": "float32",
+            "shape": (state_dim,),
+            "names": ["joint_pos"],
+        },
+        "raw.joint_pos_after": {
+            "dtype": "float32",
+            "shape": (state_dim,),
+            "names": ["joint_pos"],
+        },
+        "raw.eef_pose_before": {
+            "dtype": "float32",
+            "shape": (7,),
+            "names": ["eef_pose"],
+        },
+        "raw.eef_pose_after": {
+            "dtype": "float32",
+            "shape": (7,),
+            "names": ["eef_pose"],
+        },
+        "raw.delta_eef_action": {
+            "dtype": "float32",
+            "shape": (action_dim,),
+            "names": ["delta_eef_action"],
+        },
+        "raw.target_joint_pos": {
+            "dtype": "float32",
+            "shape": (state_dim,),
+            "names": ["joint_pos"],
+        },
+        "raw.target_eef_pose": {
+            "dtype": "float32",
+            "shape": (7,),
+            "names": ["eef_pose"],
+        },
+        "raw.success": {
+            "dtype": "float32",
+            "shape": (1,),
+            "names": ["success"],
         },
     }
     return LeRobotDataset.create(
@@ -91,26 +141,65 @@ def build_teleoperation_frame(
     object_pad=10,
     agent_image=None,
     wrist_image=None,
+    obs_before=None,
+    obs_after=None,
+    target_joint_pos=None,
+    target_eef_pose=None,
+    obj_states=None,
+    obj_q_states=None,
 ):
-    obs = env.get_observation()
+    obs_before = env.get_observation() if obs_before is None else obs_before
+    obs_after = obs_before if obs_after is None else obs_after
+    target_joint_pos = (
+        env.get_control_target_joint_pos()
+        if target_joint_pos is None
+        else np.asarray(target_joint_pos, dtype=np.float32)
+    )
+    target_eef_pose = (
+        env.get_control_target_eef_pose()
+        if target_eef_pose is None
+        else np.asarray(target_eef_pose, dtype=np.float32)
+    )
     if agent_image is None or wrist_image is None:
         agent_image, wrist_image = env.grab_image(return_side=False)
     agent_image = _resize_rgb(agent_image, image_size)
     wrist_image = _resize_rgb(wrist_image, image_size)
-    obj_states, obj_q_states = env.get_object_pose(pad=object_pad)
+    if obj_states is None or obj_q_states is None:
+        obj_states, obj_q_states = env.get_object_pose(pad=object_pad)
+    action = np.asarray(action, dtype=np.float32)
 
     return {
         "observation.image": agent_image,
         "observation.wrist_image": wrist_image,
-        "observation.state": obs["eef_pose"].astype(np.float32),
-        "action": np.asarray(action, dtype=np.float32),
-        "observation.eef_pose": obs["eef_pose"].astype(np.float32),
+        "observation.state": obs_before["joint_pos"].astype(np.float32),
+        "action": action,
+        "observation.eef_pose": obs_before["eef_pose"].astype(np.float32),
         "env.obj_pose": np.asarray(obj_states["poses"], dtype=np.float32),
         "env.obj_names": ",".join(obj_states["names"]),
         "env.obj_q_names": ",".join(obj_q_states["names"]),
         "env.obj_q_states": np.asarray(obj_q_states["poses"], dtype=np.float32),
+        "env.target_pos": obs_before["target_pos"].astype(np.float32),
+        "env.bin_pos": obs_before["bin_pos"].astype(np.float32),
         "env.config_file_name": str(config_file_name),
+        "raw.joint_pos_before": obs_before["joint_pos"].astype(np.float32),
+        "raw.joint_pos_after": obs_after["joint_pos"].astype(np.float32),
+        "raw.eef_pose_before": obs_before["eef_pose"].astype(np.float32),
+        "raw.eef_pose_after": obs_after["eef_pose"].astype(np.float32),
+        "raw.delta_eef_action": action,
+        "raw.target_joint_pos": target_joint_pos.astype(np.float32),
+        "raw.target_eef_pose": target_eef_pose.astype(np.float32),
+        "raw.success": obs_after["success"].astype(np.float32),
         "task": task,
+    }
+
+
+def filter_frame_to_dataset_features(frame, dataset):
+    """Drop fields that are not present when resuming an older dataset schema."""
+    feature_names = set(dataset.features)
+    return {
+        key: value
+        for key, value in frame.items()
+        if key == "task" or key == "timestamp" or key in feature_names
     }
 
 

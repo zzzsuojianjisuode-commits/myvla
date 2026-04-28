@@ -77,9 +77,6 @@
   },
   "object_z": {
     "t_block": 0.825,
-    "cylinder_small": 0.818,
-    "cylinder_tall": 0.845,
-    "cylinder_wide": 0.824,
     "hollow_cylinder": 0.832
   },
   "trash_bin": {
@@ -120,9 +117,6 @@
   },
   "objects": [
     "t_block",
-    "cylinder_small",
-    "cylinder_tall",
-    "cylinder_wide",
     "hollow_cylinder"
   ],
   "target_object": "hollow_cylinder",

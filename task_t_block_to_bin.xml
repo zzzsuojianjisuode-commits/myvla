@@ -19,9 +19,6 @@
     <material name="bin_mat" rgba="0.08 0.12 0.14 1"/>
     <material name="bin_inside_mat" rgba="0.02 0.03 0.035 1"/>
     <material name="t_block_mat" rgba="0.95 0.24 0.16 1"/>
-    <material name="cylinder_teal" rgba="0.05 0.62 0.78 1"/>
-    <material name="cylinder_lime" rgba="0.42 0.82 0.18 1"/>
-    <material name="cylinder_gold" rgba="0.96 0.68 0.12 1"/>
     <material name="cylinder_magenta" rgba="0.75 0.18 0.62 1"/>
   </asset>
 
@@ -50,21 +47,6 @@
       <site name="t_block_success_site" pos="0 0 0" size="0.008" rgba="1 0 0 0.6"/>
     </body>
 
-    <body name="cylinder_small" pos="0.30 -0.03 0.818">
-      <joint name="cylinder_small_free" type="free"/>
-      <inertial pos="0 0 0" mass="0.040" diaginertia="0.00003 0.00003 0.00003"/>
-      <geom name="cylinder_small_geom" type="cylinder" size="0.022 0.018" material="cylinder_teal" friction="1.2 0.02 0.001"/>
-    </body>
-    <body name="cylinder_tall" pos="0.44 0.14 0.845">
-      <joint name="cylinder_tall_free" type="free"/>
-      <inertial pos="0 0 0" mass="0.050" diaginertia="0.00004 0.00004 0.00004"/>
-      <geom name="cylinder_tall_geom" type="cylinder" size="0.018 0.045" material="cylinder_lime" friction="1.2 0.02 0.001"/>
-    </body>
-    <body name="cylinder_wide" pos="0.58 0.06 0.824">
-      <joint name="cylinder_wide_free" type="free"/>
-      <inertial pos="0 0 0" mass="0.060" diaginertia="0.00005 0.00005 0.00005"/>
-      <geom name="cylinder_wide_geom" type="cylinder" size="0.038 0.024" material="cylinder_gold" friction="1.2 0.02 0.001"/>
-    </body>
     <body name="hollow_cylinder" pos="0.62 -0.06 0.832">
       <joint name="hollow_cylinder_free" type="free"/>
       <inertial pos="0 0 0" mass="0.045" diaginertia="0.00004 0.00004 0.00004"/>

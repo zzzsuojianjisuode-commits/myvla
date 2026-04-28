@@ -17,13 +17,13 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description="Train ACT with the official lerobot-train entrypoint."
     )
-    parser.add_argument("--dataset-root", default="dataset/teleoperation_dataset")
-    parser.add_argument("--repo-id", default="t_block_to_bin")
-    parser.add_argument("--output-dir", default="ckpt/act_delta_eef")
-    parser.add_argument("--job-name", default="act_delta_eef")
+    parser.add_argument("--dataset-root", default="dataset/transforms/image_joint")
+    parser.add_argument("--repo-id", default="t_block_to_bin_image_joint")
+    parser.add_argument("--output-dir", default="ckpt/act_joint")
+    parser.add_argument("--job-name", default="act_joint")
     parser.add_argument("--device", default="cuda")
-    parser.add_argument("--steps", type=int, default=5000)
-    parser.add_argument("--batch-size", type=int, default=4)
+    parser.add_argument("--steps", type=int, default=25000)
+    parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--chunk-size", type=int, default=20)
     parser.add_argument("--n-action-steps", type=int, default=10)
     parser.add_argument("--num-workers", type=int, default=4)
@@ -48,6 +48,14 @@ def lerobot_train_executable():
 def build_command(args, extra_args):
     output_dir = resolve_path(args.output_dir)
     dataset_root = resolve_path(args.dataset_root)
+    info_path = dataset_root / "meta" / "info.json"
+    tasks_path = dataset_root / "meta" / "tasks.parquet"
+    if not info_path.exists() or not tasks_path.exists():
+        raise FileNotFoundError(
+            f"{dataset_root} is not a local LeRobot dataset. "
+            "Run `python scripts/transform_lerobot_dataset.py --preset act --overwrite` "
+            "first, or pass the matching --dataset-root/--repo-id for an existing dataset."
+        )
     command = [
         lerobot_train_executable(),
         f"--dataset.repo_id={args.repo_id}",
